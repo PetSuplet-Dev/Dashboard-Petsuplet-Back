@@ -6,11 +6,11 @@ from dotenv import load_dotenv
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 
-load_dotenv()
+from app.config import settings
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-ALGORITHM = os.getenv("JWT_ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = settings.ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
@@ -46,8 +46,14 @@ def create_access_token(data: dict, expire_delta: timedelta | None = None) -> st
 
 def verify_access_token(token: str) -> dict | None:
     """Verify the JWT token is valid and return payload"""
+    if not token or not isinstance(token, str):
+        return None
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        clean_token = token.strip()
+        while clean_token.lower().startswith("bearer "):
+            clean_token = clean_token[7:].strip()
+        clean_token = clean_token.strip('"\'')
+        payload = jwt.decode(clean_token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except JWTError:
         return None

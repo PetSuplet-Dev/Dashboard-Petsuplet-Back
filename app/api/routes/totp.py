@@ -111,11 +111,12 @@ def verify_totp(
     access_token = create_access_token(
         data={"sub": user.email_user, "rol": user.rol_user}
     )
+    cookie_samesite = "none" if settings.SECURE_COOKIES else "lax"
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
-        samesite="lax",
+        samesite=cookie_samesite,
         secure=settings.SECURE_COOKIES,
         max_age=60 * 60 * 24 * 7,
     )

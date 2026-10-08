@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.schemas.users import UserCreate, UserResponse, UserLogin, UserRegisterResponse, UserLoginResponse, UserLoginResponse2FA
 from app.models.users import Users
-from app.core.security import get_password_hash, verify_password, create_access_token
+from app.core.security import get_password_hash, verify_password, create_access_token, verify_totp_code
 from app.api.dependencies import get_current_user
 from app.config import settings
 
@@ -97,15 +97,18 @@ async def login_user(
     Soporta formato JSON (email_user/password_user) y Form Data de Swagger (username/password).
     """
     try:
+        totp_code = None
         content_type = request.headers.get("content-type", "")
         if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
             form = await request.form()
             email = form.get("username") or form.get("email_user")
             password = form.get("password") or form.get("password_user")
+            totp_code = form.get("client_secret") or form.get("totp_code") or form.get("code")
         else:
             body = await request.json()
             email = body.get("email_user") or body.get("username")
             password = body.get("password_user") or body.get("password")
+            totp_code = body.get("totp_code") or body.get("client_secret") or body.get("code")
 
         if not email or not password:
             raise HTTPException(status_code=400, detail="Email y contraseña son requeridos")
@@ -124,6 +127,30 @@ async def login_user(
             if not user.is_totp_enabled and user.totp_secret:
                 user.is_totp_enabled = True
                 await run_in_threadpool(db.commit)
+
+            # If TOTP code was supplied (e.g. Swagger Authorize client_secret or 1-step login)
+            if totp_code and user.totp_secret and verify_totp_code(user.totp_secret, str(totp_code).strip()):
+                access_token = create_access_token(
+                    data={
+                        "sub": user.email_user,
+                        "rol": user.rol_user
+                    }
+                )
+                cookie_samesite = "none" if settings.SECURE_COOKIES else "lax"
+                response.set_cookie(
+                    key="access_token",
+                    value=access_token,
+                    httponly=True,
+                    samesite=cookie_samesite,
+                    secure=settings.SECURE_COOKIES,
+                    max_age=60 * 60 * 24 * 7,
+                )
+                return {
+                    "access_token": access_token,
+                    "token_type": "bearer",
+                    "user": user
+                }
+
             return {
                 "status": "2fa_required",
                 "email": user.email_user,
@@ -137,11 +164,12 @@ async def login_user(
             }
         )
         
+        cookie_samesite = "none" if settings.SECURE_COOKIES else "lax"
         response.set_cookie(
             key="access_token",
             value=access_token,
             httponly=True,
-            samesite="lax",
+            samesite=cookie_samesite,
             secure=settings.SECURE_COOKIES,
             max_age=60 * 60 * 24 * 7,
         )
@@ -162,10 +190,11 @@ def logout_user(response: Response):
     """
     Cierra la sesión del usuario eliminando la cookie HttpOnly access_token
     """
+    cookie_samesite = "none" if settings.SECURE_COOKIES else "lax"
     response.delete_cookie(
         key="access_token",
         httponly=True,
-        samesite="lax",
+        samesite=cookie_samesite,
         secure=settings.SECURE_COOKIES,
     )
     return {"message": "Sesión cerrada correctamente"}

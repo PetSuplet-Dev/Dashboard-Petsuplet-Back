@@ -10,6 +10,7 @@ app = FastAPI(
     description="Backend modular para automatización y análisis financiero con IA",
     version="1.0.0",
     redirect_slashes=False,
+    swagger_ui_parameters={"withCredentials": True},
 )
 
 # Compresión GZip automática para respuestas superiores a 1KB
@@ -24,6 +25,7 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https://petsuplet-frontend.*\.run\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
