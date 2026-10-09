@@ -84,7 +84,8 @@ def get_customers_ranking(
     has_date_filter = bool(start_date or end_date)
     prod_qty_expr = "COALESCE(inv.product_quantity, 0)" if has_date_filter else "COALESCE(inv.product_quantity, c.product_quantity, 0)"
     subtotal_expr = "COALESCE(inv.inv_subtotal, 0)" if has_date_filter else "COALESCE(inv.inv_subtotal, c.sales_before_tax, 0)"
-    total_expr = "COALESCE(inv.inv_total, 0)" if has_date_filter else "COALESCE(inv.inv_total, c.sales_after_tax, 0)"
+    total_expr = "COALESCE(inv.inv_total, 0)" if has_date_filter else "COALESCE(inv.inv_total, c.sales_after_tax + COALESCE(cn.cn_total, 0), 0)"
+    total_invoiced_expr = "COALESCE(inv.inv_total, 0)" if has_date_filter else "COALESCE(inv.inv_total, c.sales_after_tax + COALESCE(cn.cn_total, 0), 0)"
     invoices_expr = "COALESCE(inv.total_invoices, 0)" if has_date_filter else "COALESCE(inv.total_invoices, c.total_invoices, 0)"
     cn_expr = "COALESCE(cn.total_nc, 0)" if has_date_filter else "COALESCE(cn.total_nc, c.total_credit_notes, 0)"
 
@@ -146,6 +147,7 @@ def get_customers_ranking(
             c.salesperson_type,
             c.segment,
             {prod_qty_expr} as product_quantity,
+            {total_invoiced_expr} as total_invoiced,
             GREATEST({subtotal_expr} - COALESCE(cn.cn_subtotal, 0), 0) as sales_before_tax,
             GREATEST({total_expr} - COALESCE(cn.cn_total, 0), 0) as sales_after_tax,
             {invoices_expr} as total_invoices,
@@ -186,6 +188,7 @@ def get_customers_ranking(
                 salesperson_type=r.salesperson_type,
                 segment=r.segment,
                 product_quantity=float(r.product_quantity or 0),
+                total_invoiced=float(r.total_invoiced or 0),
                 sales_before_tax=float(r.sales_before_tax or 0),
                 sales_after_tax=float(r.sales_after_tax or 0),
                 total_invoices=int(r.total_invoices or 0),

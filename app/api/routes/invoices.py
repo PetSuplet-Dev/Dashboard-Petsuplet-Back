@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException, Query, Body
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models import Invoice, CreditNote
@@ -43,11 +43,12 @@ async def sync_invoices_endpoint(
     elif raw_end and not raw_start:
         raw_start = raw_end
 
-    if not raw_start or not raw_end:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Debe proporcionar un rango de fechas válido (start_date y end_date en formato YYYY-MM-DD) para evitar sincronizaciones descontroladas.",
-        )
+    # Default to yesterday and today if no date range is provided
+    if not raw_start and not raw_end:
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
+        raw_start = yesterday.strftime("%Y-%m-%d")
+        raw_end = today.strftime("%Y-%m-%d")
 
     background_tasks.add_task(
         sync_invoices,
@@ -70,85 +71,146 @@ def get_invoice_sync_status():
     return {"is_syncing": is_invoice_syncing()}
 
 
-
-
-@router.post("/daily-check-invoices", status_code=status.HTTP_202_ACCEPTED)
-def daily_check_invoices(background_tasks: BackgroundTasks):
-    """
-    Initiates incremental synchronization of invoices from Alegra for yesterday and today
-    in the background. Responds immediately with HTTP 202 Accepted.
-    Designed for light daily updates.
-    """
-    today = datetime.now()
-    yesterday = today - timedelta(days=1)
-
-    today_str = today.strftime("%Y-%m-%d")
-    yesterday_str = yesterday.strftime("%Y-%m-%d")
-
-    background_tasks.add_task(
-        sync_alegra_invoices_task, start_date_str=yesterday_str, end_date_str=today_str
+def _calculate_kpi_summary(
+    db: Session, start_date: Optional[str], end_date: Optional[str]
+) -> Dict[str, Any]:
+    query = text("""
+    WITH inv AS (
+        SELECT 
+            COUNT(id_invoice) AS invoices_count,
+            COALESCE(SUM(total_amount), 0) AS total_amount,
+            COALESCE(SUM(subtotal), 0) AS subtotal,
+            COALESCE(SUM(tax), 0) AS tax,
+            COUNT(DISTINCT name_client) AS active_clients_count
+        FROM invoices
+        WHERE (:start_date IS NULL OR date >= CAST(:start_date AS date))
+          AND (:end_date IS NULL OR date <= CAST(:end_date AS date))
+    ),
+    inv_items AS (
+        SELECT 
+            COALESCE(SUM((elem->>'quantity')::numeric), 0) AS items_facturados
+        FROM invoices, jsonb_array_elements(items) AS elem
+        WHERE (:start_date IS NULL OR date >= CAST(:start_date AS date))
+          AND (:end_date IS NULL OR date <= CAST(:end_date AS date))
+          AND items IS NOT NULL AND jsonb_typeof(items) = 'array'
+    ),
+    cn AS (
+        SELECT 
+            COUNT(id_credit_note) AS nc_count,
+            COALESCE(SUM(total_amount), 0) AS nc_total_amount,
+            COUNT(DISTINCT id_invoice) AS linked_invoices_count,
+            COUNT(id_credit_note) FILTER (WHERE id_credit_note ILIKE 'DC%' OR id_alegra::text ILIKE 'DC%') AS dc_notes_count,
+            COALESCE(SUM(total_amount) FILTER (WHERE id_credit_note ILIKE 'DC%' OR id_alegra::text ILIKE 'DC%'), 0) AS dc_notes_amount
+        FROM credit_notes
+        WHERE (:start_date IS NULL OR COALESCE(invoice_date, date) >= CAST(:start_date AS date))
+          AND (:end_date IS NULL OR COALESCE(invoice_date, date) <= CAST(:end_date AS date))
+    ),
+    cn_items AS (
+        SELECT 
+            COALESCE(SUM((elem->>'quantity')::numeric), 0) AS items_nc
+        FROM credit_notes, jsonb_array_elements(items) AS elem
+        WHERE (:start_date IS NULL OR COALESCE(invoice_date, date) >= CAST(:start_date AS date))
+          AND (:end_date IS NULL OR COALESCE(invoice_date, date) <= CAST(:end_date AS date))
+          AND items IS NOT NULL AND jsonb_typeof(items) = 'array'
     )
-    return {"message": "Daily invoice synchronization started in the background..."}
+    SELECT 
+        inv.invoices_count,
+        inv.total_amount,
+        inv.subtotal,
+        inv.tax,
+        inv.active_clients_count,
+        inv_items.items_facturados,
+        cn.nc_count,
+        cn.nc_total_amount,
+        cn.linked_invoices_count,
+        cn.dc_notes_count,
+        cn.dc_notes_amount,
+        cn_items.items_nc
+    FROM inv, inv_items, cn, cn_items;
+    """)
+    row = db.execute(
+        query, {"start_date": start_date or None, "end_date": end_date or None}
+    ).first()
+    if not row:
+        return {
+            "invoices_count": 0,
+            "total_amount": 0.0,
+            "subtotal": 0.0,
+            "tax": 0.0,
+            "active_clients_count": 0,
+            "items_facturados": 0.0,
+            "nc_count": 0,
+            "nc_total_amount": 0.0,
+            "linked_invoices_count": 0,
+            "dc_notes_count": 0,
+            "dc_notes_amount": 0.0,
+            "items_nc": 0.0,
+        }
+    m = dict(row._mapping)
+    return {
+        "invoices_count": int(m["invoices_count"] or 0),
+        "total_amount": float(m["total_amount"] or 0),
+        "subtotal": float(m["subtotal"] or 0),
+        "tax": float(m["tax"] or 0),
+        "active_clients_count": int(m["active_clients_count"] or 0),
+        "items_facturados": float(m["items_facturados"] or 0),
+        "nc_count": int(m["nc_count"] or 0),
+        "nc_total_amount": float(m["nc_total_amount"] or 0),
+        "linked_invoices_count": int(m["linked_invoices_count"] or 0),
+        "dc_notes_count": int(m["dc_notes_count"] or 0),
+        "dc_notes_amount": float(m["dc_notes_amount"] or 0),
+        "items_nc": float(m["items_nc"] or 0),
+    }
 
 
-@router.post("/weekly-check-invoices", status_code=status.HTTP_202_ACCEPTED)
-def weekly_check_invoices(background_tasks: BackgroundTasks):
+@router.get("/kpi-summary")
+def get_kpi_summary(
+    start_date: Optional[str] = Query(None, description="Fecha inicio período actual (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Fecha fin período actual (YYYY-MM-DD)"),
+    prev_start_date: Optional[str] = Query(None, description="Fecha inicio período anterior (YYYY-MM-DD)"),
+    prev_end_date: Optional[str] = Query(None, description="Fecha fin período anterior (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+):
     """
-    Initiates synchronization of invoices from the last 7 days.
+    Retorna métricas financieras y comerciales calculadas directamente en PostgreSQL
+    para renderizado instantáneo del Dashboard general.
     """
-    today = datetime.now()
-    seven_days_ago = today - timedelta(days=7)
-
-    today_str = today.strftime("%Y-%m-%d")
-    seven_days_ago_str = seven_days_ago.strftime("%Y-%m-%d")
-
-    background_tasks.add_task(
-        sync_alegra_invoices_task,
-        start_date_str=seven_days_ago_str,
-        end_date_str=today_str,
-    )
-    return {"message": "Weekly invoice synchronization started in the background..."}
-
-
-@router.post("/period-monthly-check-invoices", status_code=status.HTTP_202_ACCEPTED)
-def period_monthly_check_invoices(background_tasks: BackgroundTasks):
-    """
-    Initiates synchronization of invoices for the current month (from day 1 to today).
-    """
-    today = datetime.now()
-    first_day_of_month = today.replace(day=1)
-
-    start_date_str = first_day_of_month.strftime("%Y-%m-%d")
-    end_date_str = today.strftime("%Y-%m-%d")
-
-    background_tasks.add_task(
-        sync_alegra_invoices_task,
-        start_date_str=start_date_str,
-        end_date_str=end_date_str,
+    current_data = _calculate_kpi_summary(db, start_date, end_date)
+    prev_data = (
+        _calculate_kpi_summary(db, prev_start_date, prev_end_date)
+        if prev_start_date and prev_end_date
+        else None
     )
     return {
-        "message": f"Monthly invoice synchronization started in the background ({start_date_str} to {end_date_str})..."
+        "current": current_data,
+        "previous": prev_data,
     }
 
 
 @router.get("/chart-timeline", response_model=List[ChartTimelineItem])
-def get_chart_timeline(db: Session = Depends(get_db)):
+def get_chart_timeline(
+    start_date: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+):
     """
     Calculates aggregated daily income (Invoices) vs expenses (Credit Notes)
     directly in PostgreSQL for fast chart rendering.
     """
-    inv_agg = (
-        db.query(Invoice.date, func.sum(Invoice.total_amount).label("incomes"))
-        .filter(Invoice.date.isnot(None))
-        .group_by(Invoice.date)
-        .all()
-    )
-    cn_agg = (
-        db.query(CreditNote.date, func.sum(CreditNote.total_amount).label("expenses"))
-        .filter(CreditNote.date.isnot(None))
-        .group_by(CreditNote.date)
-        .all()
-    )
+    inv_q = db.query(Invoice.date, func.sum(Invoice.total_amount).label("incomes")).filter(Invoice.date.isnot(None))
+    if start_date:
+        inv_q = inv_q.filter(Invoice.date >= start_date)
+    if end_date:
+        inv_q = inv_q.filter(Invoice.date <= end_date)
+    inv_agg = inv_q.group_by(Invoice.date).all()
+
+    effective_nc_date = func.coalesce(CreditNote.invoice_date, CreditNote.date)
+    cn_q = db.query(effective_nc_date.label("date"), func.sum(CreditNote.total_amount).label("expenses")).filter(effective_nc_date.isnot(None))
+    if start_date:
+        cn_q = cn_q.filter(effective_nc_date >= start_date)
+    if end_date:
+        cn_q = cn_q.filter(effective_nc_date <= end_date)
+    cn_agg = cn_q.group_by(effective_nc_date).all()
 
     daily_map: Dict[str, Dict[str, Any]] = {}
     for r in inv_agg:
@@ -171,12 +233,13 @@ def get_chart_timeline(db: Session = Depends(get_db)):
 
 @router.get("/", response_model=List[InvoiceListItem])
 def get_invoices(
-    limit: int = Query(
-        default=50, ge=1, le=500, description="Maximum number of items to return"
+    limit: Optional[int] = Query(
+        default=50, ge=1, le=100000, description="Maximum number of items to return"
     ),
     offset: int = Query(default=0, ge=0, description="Number of items to skip"),
     start_date: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
+    all_records: bool = Query(default=False, description="Return all matching records without pagination limit"),
     db: Session = Depends(get_db),
 ):
     """
@@ -215,7 +278,10 @@ def get_invoices(
     if end_date:
         query = query.filter(Invoice.date <= end_date)
 
-    query = query.offset(offset).limit(limit)
+    if not all_records and limit:
+        query = query.offset(offset).limit(limit)
+    elif offset:
+        query = query.offset(offset)
 
     rows = query.all()
 
