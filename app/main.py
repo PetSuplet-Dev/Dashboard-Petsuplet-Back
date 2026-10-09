@@ -20,12 +20,13 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://petsuplet-frontend-765331002671.us-central1.run.app",
+    "https://dev-dashboard-front-765331002671.us-central1.run.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https://petsuplet-frontend.*\.run\.app$",
+    allow_origin_regex=r"^https://(petsuplet-frontend|dev-dashboard-front).*\.run\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
