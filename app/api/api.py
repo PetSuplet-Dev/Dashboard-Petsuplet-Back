@@ -9,6 +9,7 @@ from app.api.routes import (
     financial_agent,
     totp,
     customers,
+    suppliers,
 )
 
 api_router = APIRouter()
@@ -27,4 +28,5 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(financial_agent.router)
 api_router.include_router(totp.router, prefix="/totp", tags=["totp"])
 api_router.include_router(customers.router, prefix="/customers", tags=["customers"])
+api_router.include_router(suppliers.router, prefix="/suppliers", tags=["suppliers"])
 

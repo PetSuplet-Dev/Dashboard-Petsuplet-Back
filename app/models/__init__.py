@@ -4,6 +4,7 @@ from .invoice_reconciliations import InvoiceReconciliation
 from .financial_agent import Conversation, Message, CanvasArtifact
 from .users import Users
 from .customer import Customer
+from .supplier import SupplierDirectory
 
 __all__ = [
     "Invoice",
@@ -14,5 +15,6 @@ __all__ = [
     "CanvasArtifact",
     "Users",
     "Customer",
+    "SupplierDirectory",
 ]
 
