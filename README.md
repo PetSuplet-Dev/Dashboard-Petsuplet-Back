@@ -1,4 +1,4 @@
-# Backend API / PetSuplet Backend
+# Backend API / PetSuplet Backend 
 
 Este es el repositorio central del Backend para **PetSuplet**, construido en **Python** utilizando un enfoque modular y escalable. Cuenta con integraciones avanzadas de inteligencia artificial (Gemini), gestión de facturación y un sistema seguro de autenticación.
 
