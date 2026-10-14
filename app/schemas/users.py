@@ -18,6 +18,7 @@ class UserBase(BaseModel):
     email_user: str
     rol_user: Optional[UserRole] = UserRole.Seller
     created_at: Optional[datetime] = None
+    is_totp_enabled: Optional[bool] = False
 
     class Config:
         use_enum_values = True
