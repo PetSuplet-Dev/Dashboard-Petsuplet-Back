@@ -1,0 +1,18 @@
+steps:
+  # 1. Compilar la imagen Docker
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "build",
+        "-t",
+        "us-central1-docker.pkg.dev/civic-indexer-501220-d4/testing-petsuplet-website/petsuplet-frontend:dev",
+        ".",
+      ]
+
+# 2. Indicar las imágenes que deben subirse a Artifact Registry
+images:
+  - "us-central1-docker.pkg.dev/civic-indexer-501220-d4/testing-petsuplet-website/petsuplet-frontend:dev"
+
+# 3. Cumplir con la política de logs de la organización:
+options:
+  logging: CLOUD_LOGGING_ONLY
