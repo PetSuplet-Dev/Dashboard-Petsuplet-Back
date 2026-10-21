@@ -22,6 +22,7 @@ class CustomerRankingItem(BaseModel):
     salesperson_type: Optional[str] = None
     segment: Optional[str] = None
     product_quantity: float = 0.0
+    total_invoiced: float = 0.0
     sales_before_tax: float = 0.0
     sales_after_tax: float = 0.0
     total_invoices: int = 0

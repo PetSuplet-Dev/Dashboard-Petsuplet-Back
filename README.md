@@ -1,4 +1,4 @@
-# Backend API / PetSuplet Backend
+# Backend API / PetSuplet Backend 
 
 Este es el repositorio central del Backend para **PetSuplet**, construido en **Python** utilizando un enfoque modular y escalable. Cuenta con integraciones avanzadas de inteligencia artificial (Gemini), gestión de facturación y un sistema seguro de autenticación.
 
@@ -112,3 +112,4 @@ Para cualquier funcionalidad o endpoint nuevo, debes respetar rigurosamente la s
 
 - **Datos Sensibles**: Nunca subas el archivo .env al repositorio. Asegúrate de añadir cualquier variable nueva al archivo .env.example con valores ficticios.
 - **Tokens**: Toda ruta protegida debe validar el token Bearer utilizando los métodos definidos en App/core/security.py.
+ 

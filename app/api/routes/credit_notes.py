@@ -68,11 +68,12 @@ async def sync_credit_notes_endpoint(
     elif raw_end and not raw_start:
         raw_start = raw_end
 
-    if not raw_start or not raw_end:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Debe proporcionar un rango de fechas válido (start_date y end_date en formato YYYY-MM-DD) para evitar sincronizaciones descontroladas.",
-        )
+    # Default to yesterday and today if no date range is provided
+    if not raw_start and not raw_end:
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
+        raw_start = yesterday.strftime("%Y-%m-%d")
+        raw_end = today.strftime("%Y-%m-%d")
 
     background_tasks.add_task(
         sync_credit_notes,
@@ -95,77 +96,15 @@ def get_credit_notes_sync_status():
     return {"is_syncing": is_credit_note_syncing()}
 
 
-
-@router.post("/daily-check-credit-notes", status_code=status.HTTP_202_ACCEPTED)
-def daily_check_credit_notes(background_tasks: BackgroundTasks):
-    """
-    Initiates incremental synchronization of credit notes from Alegra for yesterday and today
-    in the background.
-    """
-    today = datetime.now()
-    yesterday = today - timedelta(days=1)
-
-    today_str = today.strftime("%Y-%m-%d")
-    yesterday_str = yesterday.strftime("%Y-%m-%d")
-
-    background_tasks.add_task(
-        sync_alegra_credit_notes_task,
-        start_date_str=yesterday_str,
-        end_date_str=today_str,
-    )
-    return {"message": "Daily credit note synchronization started in the background..."}
-
-
-@router.post("/weekly-check-credit-notes", status_code=status.HTTP_202_ACCEPTED)
-def weekly_check_credit_notes(background_tasks: BackgroundTasks):
-    """
-    Initiates synchronization of credit notes from the last 7 days.
-    """
-    today = datetime.now()
-    seven_days_ago = today - timedelta(days=7)
-
-    today_str = today.strftime("%Y-%m-%d")
-    seven_days_ago_str = seven_days_ago.strftime("%Y-%m-%d")
-
-    background_tasks.add_task(
-        sync_alegra_credit_notes_task,
-        start_date_str=seven_days_ago_str,
-        end_date_str=today_str,
-    )
-    return {
-        "message": "Weekly credit note synchronization started in the background..."
-    }
-
-
-@router.post("/period-monthly-check-credit-notes", status_code=status.HTTP_202_ACCEPTED)
-def period_monthly_check_credit_notes(background_tasks: BackgroundTasks):
-    """
-    Initiates synchronization of credit notes for the current month (from day 1 to today).
-    """
-    today = datetime.now()
-    first_day_of_month = today.replace(day=1)
-
-    start_date_str = first_day_of_month.strftime("%Y-%m-%d")
-    end_date_str = today.strftime("%Y-%m-%d")
-
-    background_tasks.add_task(
-        sync_alegra_credit_notes_task,
-        start_date_str=start_date_str,
-        end_date_str=end_date_str,
-    )
-    return {
-        "message": f"Monthly credit note synchronization started in the background ({start_date_str} to {end_date_str})..."
-    }
-
-
 @router.get("/", response_model=List[CreditNoteListItem])
 def get_credit_notes(
-    limit: int = Query(
-        default=50, ge=1, le=500, description="Maximum number of items to return"
+    limit: Optional[int] = Query(
+        default=50, ge=1, le=100000, description="Maximum number of items to return"
     ),
     offset: int = Query(default=0, ge=0, description="Number of items to skip"),
     start_date: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
+    all_records: bool = Query(default=False, description="Return all matching records without pagination limit"),
     db: Session = Depends(get_db),
 ):
     """
@@ -206,7 +145,10 @@ def get_credit_notes(
 
     query = query.order_by(effective_date.desc(), CreditNote.date.desc())
 
-    query = query.offset(offset).limit(limit)
+    if not all_records and limit:
+        query = query.offset(offset).limit(limit)
+    elif offset:
+        query = query.offset(offset)
 
     rows = query.all()
 
