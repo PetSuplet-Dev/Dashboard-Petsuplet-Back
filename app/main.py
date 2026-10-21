@@ -13,9 +13,6 @@ app = FastAPI(
     swagger_ui_parameters={"withCredentials": True},
 )
 
-# Compresión GZip automática para respuestas superiores a 1KB
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -31,6 +28,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
+
+# Compresión GZip automática para respuestas superiores a 1KB
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 2. IMPORTACIONES LUEGO DE CREAR LA APP
 from app import models
