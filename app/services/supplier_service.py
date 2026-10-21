@@ -499,8 +499,16 @@ def get_supplier_ranking_data(
     return total_records, paginated
 
 
-def get_supplier_summary_by_id_or_nit(session: Session, supplier_key: str) -> Optional[Dict[str, Any]]:
-    """Obtiene el resumen detallado para el panel lateral de un proveedor."""
+def get_supplier_summary_by_id_or_nit(
+    session: Session,
+    supplier_key: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Obtiene el resumen detallado para el panel lateral de un proveedor.
+    Si se especifican filtros de fechas, calcula métricas en tiempo real para ese período.
+    """
     # Buscar por id o nit o supplier_name
     query = """
         SELECT 
@@ -517,25 +525,99 @@ def get_supplier_summary_by_id_or_nit(session: Session, supplier_key: str) -> Op
     if not row:
         return None
 
-    try:
-        rev = float(row.annual_revenue or 0.0)
-    except (ValueError, TypeError):
-        rev = 0.0
-    try:
-        pct = float(row.current_year_sales_percentage or 0.0)
-    except (ValueError, TypeError):
-        pct = 0.0
-    try:
-        qty = float(row.total_products_sold or 0.0)
-    except (ValueError, TypeError):
-        qty = 0.0
+    has_date_filter = bool(start_date or end_date)
 
-    top_p = []
-    if row.top_products:
+    if has_date_filter:
+        date_filter_inv = ""
+        params_date: Dict[str, Any] = {}
+        if start_date:
+            date_filter_inv += " AND inv.date >= :start_date"
+            params_date["start_date"] = start_date
+        if end_date:
+            date_filter_inv += " AND inv.date <= :end_date"
+            params_date["end_date"] = end_date
+
+        total_rev_sql = f"""
+            SELECT COALESCE(SUM(COALESCE((item->>'total')::numeric, (item->>'price')::numeric * COALESCE((item->>'quantity')::numeric, 1), 0)), 0)
+            FROM invoices inv,
+                 jsonb_array_elements(CASE WHEN inv.items IS NOT NULL AND jsonb_typeof(inv.items) = 'array' THEN inv.items ELSE '[]'::jsonb END) item
+            WHERE item->>'reference' IS NOT NULL AND item->>'reference' != '' {date_filter_inv}
+        """
+        total_revenue_all = float(session.execute(text(total_rev_sql), params_date).scalar() or 1.0)
+        if total_revenue_all <= 0:
+            total_revenue_all = 1.0
+
+        matched_brands = get_supplier_brand_names(row.supplier_name)
+        matched_brands_lower = [b.strip().lower() for b in matched_brands]
+
+        sales_sql = f"""
+            WITH item_agg AS (
+                SELECT 
+                    item->>'reference' as ref,
+                    SUM(COALESCE((item->>'quantity')::numeric, 1)) as qty,
+                    SUM(COALESCE((item->>'total')::numeric, (item->>'price')::numeric * COALESCE((item->>'quantity')::numeric, 1), 0)) as revenue
+                FROM invoices inv,
+                     jsonb_array_elements(CASE WHEN inv.items IS NOT NULL AND jsonb_typeof(inv.items) = 'array' THEN inv.items ELSE '[]'::jsonb END) item
+                WHERE item->>'reference' IS NOT NULL AND item->>'reference' != '' {date_filter_inv}
+                GROUP BY item->>'reference'
+            )
+            SELECT 
+                p.supplier_name,
+                p.product_name,
+                SUM(agg.qty) as total_qty,
+                SUM(agg.revenue) as total_revenue
+            FROM item_agg agg
+            JOIN products p ON p.code = agg.ref
+            GROUP BY p.supplier_name, p.product_name
+        """
+        sales_rows = session.execute(text(sales_sql), params_date).fetchall()
+
+        sup_rev = 0.0
+        sup_qty = 0.0
+        prod_map: Dict[str, Dict[str, Any]] = {}
+        for r in sales_rows:
+            brand = (r.supplier_name or "").strip().lower()
+            if not brand:
+                continue
+            is_match = False
+            for b_name in matched_brands_lower:
+                if brand == b_name or b_name in brand:
+                    is_match = True
+                    break
+            if is_match:
+                sup_rev += float(r.total_revenue or 0.0)
+                sup_qty += float(r.total_qty or 0.0)
+                pn = r.product_name
+                if pn not in prod_map:
+                    prod_map[pn] = {"qty": 0.0, "revenue": 0.0}
+                prod_map[pn]["qty"] += float(r.total_qty or 0.0)
+                prod_map[pn]["revenue"] += float(r.total_revenue or 0.0)
+
+        pct = (sup_rev / total_revenue_all) * 100.0
+        sorted_p = sorted(prod_map.items(), key=lambda x: (x[1]["qty"], x[1]["revenue"]), reverse=True)
+        top_p = [name for name, _ in sorted_p[:5]]
+        rev = sup_rev
+        qty = sup_qty
+    else:
         try:
-            top_p = json.loads(row.top_products)
-        except Exception:
-            top_p = [p.strip() for p in row.top_products.split(",") if p.strip()]
+            rev = float(row.annual_revenue or 0.0)
+        except (ValueError, TypeError):
+            rev = 0.0
+        try:
+            pct = float(row.current_year_sales_percentage or 0.0)
+        except (ValueError, TypeError):
+            pct = 0.0
+        try:
+            qty = float(row.total_products_sold or 0.0)
+        except (ValueError, TypeError):
+            qty = 0.0
+
+        top_p = []
+        if row.top_products:
+            try:
+                top_p = json.loads(row.top_products)
+            except Exception:
+                top_p = [p.strip() for p in row.top_products.split(",") if p.strip()]
 
     return {
         "id": str(row.id),

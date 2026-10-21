@@ -59,11 +59,22 @@ def recalculate_supplier_metrics(db: Session = Depends(get_db)):
 
 
 @router.get("/{id_or_nit}/summary", response_model=SupplierSummary)
-def get_supplier_summary(id_or_nit: str, db: Session = Depends(get_db)):
+def get_supplier_summary(
+    id_or_nit: str,
+    start_date: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+):
     """
-    Obtiene el resumen detallado de un proveedor para el panel lateral (Aside).
+    Obtiene el resumen detallado de un proveedor para el panel lateral (Aside),
+    calculando métricas dinámicas si se especifican filtros de fecha.
     """
-    summary = get_supplier_summary_by_id_or_nit(session=db, supplier_key=id_or_nit)
+    summary = get_supplier_summary_by_id_or_nit(
+        session=db,
+        supplier_key=id_or_nit,
+        start_date=start_date,
+        end_date=end_date,
+    )
     if not summary:
         raise HTTPException(
             status_code=404, detail="Proveedor no encontrado en el directorio"
