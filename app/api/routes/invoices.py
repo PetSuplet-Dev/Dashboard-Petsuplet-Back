@@ -1,6 +1,15 @@
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException, Query, Body
+from fastapi import (
+    APIRouter,
+    Depends,
+    BackgroundTasks,
+    status,
+    HTTPException,
+    Query,
+    Body,
+    Response,
+)
 from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -17,8 +26,6 @@ class SyncRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
-
-from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException, Query, Body, Response
 
 @router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
 async def sync_invoices_endpoint(

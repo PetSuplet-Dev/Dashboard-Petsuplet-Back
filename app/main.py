@@ -1,5 +1,7 @@
 import os
 import re
+import logging
+from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -8,13 +10,39 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-# 1. CREAR LA APP INMEDIATAMENTE
+from app import models
+from app.api.api import api_router
+from app.scheduler import setup_scheduler, scheduler
+
+logger = logging.getLogger("main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: iniciar planificador de tareas en segundo plano
+    try:
+        task_scheduler = setup_scheduler()
+        task_scheduler.start()
+        logger.info("Planificador de tareas en segundo plano iniciado con éxito.")
+    except Exception as e:
+        logger.error(f"Error al iniciar el planificador de tareas: {e}", exc_info=True)
+    yield
+    # Shutdown: detener planificador de tareas de forma limpia
+    try:
+        if scheduler.running:
+            scheduler.shutdown()
+            logger.info("Planificador de tareas detenido con éxito.")
+    except Exception as e:
+        logger.error(f"Error al detener el planificador de tareas: {e}", exc_info=True)
+
+
 app = FastAPI(
     title="Automatization IA Backend",
     description="Backend modular para automatización y análisis financiero con IA",
     version="1.0.0",
     redirect_slashes=False,
     swagger_ui_parameters={"withCredentials": True},
+    lifespan=lifespan,
 )
 
 origins = [
@@ -68,11 +96,6 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
     return response
 
 
-# 2. IMPORTACIONES LUEGO DE CREAR LA APP
-from app import models
-from app.api.api import api_router
-from app.scheduler import setup_scheduler
-
 # Incluir las rutas
 app.include_router(api_router, prefix="/api")
 
@@ -80,31 +103,6 @@ app.include_router(api_router, prefix="/api")
 @app.get("/")
 def read_root():
     return {"message": "Automatization IA API is running successfully!"}
-
-
-# 3. MANEJO DE EVENTOS DE ARRANQUE Y PARADA
-@app.on_event("startup")
-def on_startup():
-    # Iniciar el planificador de tareas
-    try:
-        scheduler = setup_scheduler()
-        scheduler.start()
-        print("Planificador de tareas en segundo plano iniciado con éxito.")
-    except Exception as e:
-        print(f"Error al iniciar el planificador de tareas: {e}")
-
-
-@app.on_event("shutdown")
-def on_shutdown():
-    # Detener el planificador de tareas
-    try:
-        from app.scheduler import scheduler
-
-        if scheduler.running:
-            scheduler.shutdown()
-            print("Planificador de tareas detenido con éxito.")
-    except Exception as e:
-        print(f"Error al detener el planificador de tareas: {e}")
 
 
 if __name__ == "__main__":

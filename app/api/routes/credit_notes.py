@@ -8,6 +8,7 @@ from fastapi import (
     HTTPException,
     Query,
     Body,
+    Response,
 )
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, defer
@@ -26,9 +27,6 @@ router = APIRouter(dependencies=[Depends(get_current_user)])
 class SyncRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
-
-
-from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException, Query, Body, Response
 
 @router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
 async def sync_credit_notes_endpoint(

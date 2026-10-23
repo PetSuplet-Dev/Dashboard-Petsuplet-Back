@@ -1,3 +1,4 @@
+import logging
 from typing import List, Union, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Query
 from starlette.concurrency import run_in_threadpool
@@ -9,6 +10,7 @@ from app.core.security import get_password_hash, verify_password, create_access_
 from app.api.dependencies import get_current_user
 from app.config import settings
 
+logger = logging.getLogger("users")
 router = APIRouter()
 
 @router.get("/", response_model=List[UserResponse])
@@ -25,7 +27,8 @@ def get_users(
         return db.query(Users).offset(offset).limit(limit).all()
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error al obtener usuarios: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor. Por favor intente más tarde.")
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_profile(current_user: Users = Depends(get_current_user)):
@@ -52,7 +55,8 @@ def get_user_email(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error al obtener usuario por email: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor. Por favor intente más tarde.")
 
 @router.post("/register", response_model=UserRegisterResponse, status_code=status.HTTP_201_CREATED)
 def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
@@ -84,7 +88,8 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error al registrar usuario: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor. Por favor intente más tarde.")
 
 @router.post("/login", response_model=Union[UserLoginResponse, UserLoginResponse2FA])
 async def login_user(
@@ -137,13 +142,14 @@ async def login_user(
                     }
                 )
                 cookie_samesite = "none" if settings.SECURE_COOKIES else "lax"
+                cookie_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
                 response.set_cookie(
                     key="access_token",
                     value=access_token,
                     httponly=True,
                     samesite=cookie_samesite,
                     secure=settings.SECURE_COOKIES,
-                    max_age=60 * 60 * 24 * 7,
+                    max_age=cookie_max_age,
                 )
                 return {
                     "access_token": access_token,
@@ -165,13 +171,14 @@ async def login_user(
         )
         
         cookie_samesite = "none" if settings.SECURE_COOKIES else "lax"
+        cookie_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         response.set_cookie(
             key="access_token",
             value=access_token,
             httponly=True,
             samesite=cookie_samesite,
             secure=settings.SECURE_COOKIES,
-            max_age=60 * 60 * 24 * 7,
+            max_age=cookie_max_age,
         )
         
         return {
@@ -183,7 +190,38 @@ async def login_user(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error en login de usuario: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor al procesar el inicio de sesión.")
+
+@router.post("/refresh", response_model=UserLoginResponse)
+def refresh_token(
+    response: Response,
+    current_user: Users = Depends(get_current_user),
+):
+    """
+    Renueva el token JWT y la cookie HttpOnly del usuario autenticado, extendiendo la sesión activa.
+    """
+    access_token = create_access_token(
+        data={
+            "sub": current_user.email_user,
+            "rol": current_user.rol_user,
+        }
+    )
+    cookie_samesite = "none" if settings.SECURE_COOKIES else "lax"
+    cookie_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        samesite=cookie_samesite,
+        secure=settings.SECURE_COOKIES,
+        max_age=cookie_max_age,
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": current_user,
+    }
 
 @router.post("/logout")
 def logout_user(response: Response):
@@ -217,4 +255,5 @@ def get_user(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error al obtener usuario por id: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor. Por favor intente más tarde.")
