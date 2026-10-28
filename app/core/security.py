@@ -36,7 +36,7 @@ def create_access_token(data: dict, expire_delta: timedelta | None = None) -> st
         expire = datetime.now(timezone.utc) + expire_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(
-            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
 
     to_encode.update({"exp": expire})
@@ -75,6 +75,13 @@ def get_totp_uri(secret: str, email: str) -> str:
 
 
 def verify_totp_code(secret: str, code: str) -> bool:
-    """Verifies the 6-digit TOTP token against the user's secret."""
-    totp = pyotp.TOTP(secret)
-    return totp.verify(code)
+    """Verifies the 6-digit TOTP token against the user's secret with clock drift tolerance."""
+    if not secret or not code:
+        return False
+    try:
+        clean_code = str(code).strip()
+        totp = pyotp.TOTP(secret)
+        # valid_window=1 allows +- 30 seconds for clock drift between server and authenticator app
+        return bool(totp.verify(clean_code, valid_window=1))
+    except Exception:
+        return False

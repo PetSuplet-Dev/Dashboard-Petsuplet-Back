@@ -5,8 +5,12 @@ from sqlalchemy import create_engine
 from langchain_community.utilities import SQLDatabase
 from app.config import settings
 
-# Read-only database engine configured with effective_readonly_db_url
-readonly_engine = create_engine(settings.effective_readonly_db_url)
+# Read-only database engine configured with effective_readonly_db_url and pre-ping
+readonly_engine = create_engine(
+    settings.effective_readonly_db_url,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+)
 
 
 def get_sql_database(include_tables: Optional[List[str]] = None) -> SQLDatabase:
@@ -24,7 +28,9 @@ def get_gemini_client() -> genai.Client:
     Toma automáticamente las credenciales de ADC (Application Default Credentials).
     """
     return genai.Client(
-        vertexai=True, project="civic-indexer-501220-d4", location="us-central1"
+        vertexai=True,
+        project=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.GOOGLE_CLOUD_LOCATION,
     )
 
 
