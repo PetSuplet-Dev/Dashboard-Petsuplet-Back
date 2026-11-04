@@ -26,9 +26,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     SECURE_COOKIES: bool = True
     ALGORITHM: str = Field("HS256", validation_alias=AliasChoices("ALGORITHM", "JWT_ALGORITHM"))
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     READONLY_DATABASE_URL: Optional[str] = None
     GOOGLE_CLOUD_LOCATION: str = "us-central1"
+    GOOGLE_GEMINI: Optional[str] = None
 
     @model_validator(mode="after")
     def resolve_cookie_security(self) -> "Settings":

@@ -1,6 +1,15 @@
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, BackgroundTasks, status, HTTPException, Query, Body
+from fastapi import (
+    APIRouter,
+    Depends,
+    BackgroundTasks,
+    status,
+    HTTPException,
+    Query,
+    Body,
+    Response,
+)
 from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -21,13 +30,15 @@ class SyncRequest(BaseModel):
 @router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
 async def sync_invoices_endpoint(
     background_tasks: BackgroundTasks,
+    response: Response,
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    wait: Optional[bool] = Query(False, description="Wait for completion and return processed count"),
     payload: Optional[SyncRequest] = Body(None),
 ):
     """
-    Manually triggers invoice synchronization from Alegra in the background.
-    Requires valid YYYY-MM-DD dates to prevent accidental mass downloads.
+    Manually triggers invoice synchronization from Alegra.
+    Supports asynchronous background execution or synchronous wait.
     """
     body_start = payload.start_date if payload and payload.start_date not in (None, "", "string", "null", "undefined") else None
     body_end = payload.end_date if payload and payload.end_date not in (None, "", "string", "null", "undefined") else None
@@ -50,6 +61,16 @@ async def sync_invoices_endpoint(
         raw_start = yesterday.strftime("%Y-%m-%d")
         raw_end = today.strftime("%Y-%m-%d")
 
+    if wait:
+        result = await sync_invoices(start_date=raw_start, end_date=raw_end)
+        response.status_code = status.HTTP_200_OK
+        return {
+            "status": "completed",
+            "processed": result.get("processed", 0),
+            "start_date": raw_start,
+            "end_date": raw_end,
+        }
+
     background_tasks.add_task(
         sync_invoices,
         start_date=raw_start,
@@ -65,10 +86,14 @@ async def sync_invoices_endpoint(
 @router.get("/sync-status")
 def get_invoice_sync_status():
     """
-    Returns whether an invoice synchronization background task is currently active.
+    Returns whether an invoice synchronization background task is currently active,
+    along with details of the last synchronization.
     """
-    from app.core.tasks import is_invoice_syncing
-    return {"is_syncing": is_invoice_syncing()}
+    from app.core.tasks import is_invoice_syncing, get_last_invoice_sync
+    return {
+        "is_syncing": is_invoice_syncing(),
+        "last_sync": get_last_invoice_sync(),
+    }
 
 
 def _calculate_kpi_summary(

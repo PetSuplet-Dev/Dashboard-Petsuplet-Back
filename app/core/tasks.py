@@ -18,6 +18,24 @@ logger = logging.getLogger(__name__)
 INVOICE_SYNC_LOCK = asyncio.Lock()
 CREDIT_NOTE_SYNC_LOCK = asyncio.Lock()
 
+LAST_INVOICE_SYNC: Dict[str, Any] = {
+    "status": "idle",
+    "processed": 0,
+    "start_date": None,
+    "end_date": None,
+    "timestamp": None,
+    "message": None,
+}
+
+LAST_CREDIT_NOTE_SYNC: Dict[str, Any] = {
+    "status": "idle",
+    "processed": 0,
+    "start_date": None,
+    "end_date": None,
+    "timestamp": None,
+    "message": None,
+}
+
 
 def is_invoice_syncing() -> bool:
     """Return whether invoice sync task is currently locked/running."""
@@ -27,6 +45,14 @@ def is_invoice_syncing() -> bool:
 def is_credit_note_syncing() -> bool:
     """Return whether credit note sync task is currently locked/running."""
     return CREDIT_NOTE_SYNC_LOCK.locked()
+
+
+def get_last_invoice_sync() -> Dict[str, Any]:
+    return LAST_INVOICE_SYNC
+
+
+def get_last_credit_note_sync() -> Dict[str, Any]:
+    return LAST_CREDIT_NOTE_SYNC
 
 
 def __getattr__(name: str):
@@ -613,6 +639,12 @@ async def sync_invoices(
         should_close_session = db is None
         alegra_client = get_alegra_client()
 
+        LAST_INVOICE_SYNC["status"] = "running"
+        LAST_INVOICE_SYNC["start_date"] = start_date
+        LAST_INVOICE_SYNC["end_date"] = end_date
+        LAST_INVOICE_SYNC["timestamp"] = datetime.now().isoformat()
+        LAST_INVOICE_SYNC["message"] = None
+
         try:
             use_day_by_day = start_date and end_date
             logger.info(
@@ -641,10 +673,16 @@ async def sync_invoices(
                 f"[sync_invoices] Finished. Total processed: {total_processed} "
                 f"(period: {start_date or 'all'} to {end_date or 'all'})."
             )
+            LAST_INVOICE_SYNC["status"] = "completed"
+            LAST_INVOICE_SYNC["processed"] = total_processed
+            LAST_INVOICE_SYNC["timestamp"] = datetime.now().isoformat()
             return {"status": "completed", "processed": total_processed}
         except Exception as e:
             logger.error(f"Error in invoice synchronization task: {str(e)}")
             print(f"Error in invoice synchronization task: {str(e)}")
+            LAST_INVOICE_SYNC["status"] = "error"
+            LAST_INVOICE_SYNC["message"] = str(e)
+            LAST_INVOICE_SYNC["timestamp"] = datetime.now().isoformat()
             if session:
                 await run_in_threadpool(_rollback_session_sync, session)
             raise e
@@ -693,6 +731,12 @@ async def sync_credit_notes(
         should_close_session = db is None
         alegra_client = get_alegra_client()
 
+        LAST_CREDIT_NOTE_SYNC["status"] = "running"
+        LAST_CREDIT_NOTE_SYNC["start_date"] = start_date
+        LAST_CREDIT_NOTE_SYNC["end_date"] = end_date
+        LAST_CREDIT_NOTE_SYNC["timestamp"] = datetime.now().isoformat()
+        LAST_CREDIT_NOTE_SYNC["message"] = None
+
         try:
             use_day_by_day = start_date and end_date
             logger.info(
@@ -721,10 +765,16 @@ async def sync_credit_notes(
                 f"[sync_credit_notes] Finished. Total processed: {total_processed} "
                 f"(period: {start_date or 'all'} to {end_date or 'all'})."
             )
+            LAST_CREDIT_NOTE_SYNC["status"] = "completed"
+            LAST_CREDIT_NOTE_SYNC["processed"] = total_processed
+            LAST_CREDIT_NOTE_SYNC["timestamp"] = datetime.now().isoformat()
             return {"status": "completed", "processed": total_processed}
         except Exception as e:
             logger.error(f"Error in credit notes synchronization task: {str(e)}")
             print(f"Error in credit notes synchronization task: {str(e)}")
+            LAST_CREDIT_NOTE_SYNC["status"] = "error"
+            LAST_CREDIT_NOTE_SYNC["message"] = str(e)
+            LAST_CREDIT_NOTE_SYNC["timestamp"] = datetime.now().isoformat()
             if session:
                 await run_in_threadpool(_rollback_session_sync, session)
             raise e

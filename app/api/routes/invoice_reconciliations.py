@@ -34,16 +34,16 @@ def sync_reconciliations(
     """
     if background:
         def task_wrapper():
+            from app.database.session import SessionLocal
+            session = SessionLocal()
             try:
-                from app.database.session import SessionLocal
-                session = SessionLocal()
-                try:
-                    result = run_reconciliation(session)
-                    print(f"Background reconciliation complete. New records: {result}")
-                finally:
-                    session.close()
+                result = run_reconciliation(session)
+                print(f"Background reconciliation complete. New records: {result}")
             except Exception as e:
+                session.rollback()
                 print(f"Error executing reconciliation task: {str(e)}")
+            finally:
+                session.close()
 
         background_tasks.add_task(task_wrapper)
 
@@ -72,16 +72,19 @@ def sync_reconciliations(
             total_records=total_records,
         )
     except DatabasePermissionDeniedError as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e),
         )
     except ReconciliationServiceError as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
     except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error during reconciliation: {str(e)}",

@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ import qrcode
 import io
 import base64
 
+logger = logging.getLogger("totp")
 router = APIRouter()
 
 
@@ -28,28 +30,39 @@ class VerifyTotpRequest(BaseModel):
 def totp_setup(
     db: Session = Depends(get_db), current_user: Users = Depends(get_current_user)
 ):
-    if current_user.is_totp_enabled:
+    try:
+        if current_user.is_totp_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="TOTP is already enabled.",
+            )
+
+        if not current_user.totp_secret:
+            current_user.totp_secret = generate_totp_secret()
+            db.commit()
+
+        totp_uri = get_totp_uri(current_user.totp_secret, current_user.email_user)
+
+        # Generate QR code
+        img = qrcode.make(totp_uri)
+        buf = io.BytesIO()
+        img.save(buf)
+        qr_code_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        return {
+            "qr_code": f"data:image/png;base64,{qr_code_b64}",
+            "secret": current_user.totp_secret,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error("Error setting up TOTP: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="TOTP is already enabled.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al configurar el autenticador 2FA.",
         )
 
-    if not current_user.totp_secret:
-        current_user.totp_secret = generate_totp_secret()
-        db.commit()
-
-    totp_uri = get_totp_uri(current_user.totp_secret, current_user.email_user)
-
-    # Generate QR code
-    img = qrcode.make(totp_uri)
-    buf = io.BytesIO()
-    img.save(buf)
-    qr_code_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-    return {
-        "qr_code": f"data:image/png;base64,{qr_code_b64}",
-        "secret": current_user.totp_secret,
-    }
 
 
 @router.post("/enable")
@@ -112,13 +125,14 @@ def verify_totp(
         data={"sub": user.email_user, "rol": user.rol_user}
     )
     cookie_samesite = "none" if settings.SECURE_COOKIES else "lax"
+    cookie_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         samesite=cookie_samesite,
         secure=settings.SECURE_COOKIES,
-        max_age=60 * 60 * 24 * 7,
+        max_age=cookie_max_age,
     )
     return {
         "access_token": access_token,

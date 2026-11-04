@@ -17,6 +17,8 @@ class UserBase(BaseModel):
     lastname_user: str
     email_user: str
     rol_user: Optional[UserRole] = UserRole.Seller
+    nickname: Optional[str] = None
+    phone: Optional[str] = None
     created_at: Optional[datetime] = None
     is_totp_enabled: Optional[bool] = False
 
@@ -27,6 +29,10 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password_user: str
+    nickname: Optional[str] = None
+    phone: Optional[str] = None
+    nickname_user: Optional[str] = None
+    phone_user: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
@@ -35,10 +41,19 @@ class UserUpdate(BaseModel):
     email_user: Optional[str] = None
     password_user: Optional[str] = None
     rol_user: Optional[UserRole] = None
+    nickname: Optional[str] = None
+    phone: Optional[str] = None
+    nickname_user: Optional[str] = None
+    phone_user: Optional[str] = None
 
 
 class UserDelete(BaseModel):
     id_user: int
+    reason: Optional[str] = None
+
+
+class UserDeleteRequest(BaseModel):
+    reason: Optional[str] = None
 
 
 class UserResponse(UserBase):
